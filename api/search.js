@@ -2,114 +2,169 @@
 import { google } from 'googleapis';
 import axios from 'axios';
 
+// 1) Google Sheets 서비스 계정 인증
 const creds = JSON.parse(process.env.GOOGLE_SHEETS_CREDENTIALS);
 const authClient = new google.auth.JWT(
-  creds.client_email, null, creds.private_key,
+  creds.client_email,
+  null,
+  creds.private_key,
   ['https://www.googleapis.com/auth/spreadsheets']
 );
 
-// 검색식 파싱
+// 2) 검색식 파싱: TN, TC, SC
 function parseSearchQuery(q) {
-  const tn = (q.match(/TN=\[([^\]]+)\]/) || [])[1]?.split('+') || [];
-  const tc = (q.match(/TC=\[([^\]]+)\]/) || [])[1]?.split('+') || [];
-  const sc = (q.match(/SC=\[([^\]]+)\]/) || [])[1]?.split('+') || [];
-  return { trademarkNames: tn, productClasses: tc, similarGroupCodes: sc };
+  const getList = key => {
+    const m = new RegExp(`${key}=\\[([^\\]]*)\\]`).exec(q);
+    return m && m[1] ? m[1].split('+') : [];
+  };
+  return {
+    trademarkNames: getList('TN'),            // ["콘티플","칸토플",…]
+    classification: getList('TC').join('+'),  // "09+42"
+    similarityCode: getList('SC').join(',')   // "G390802,S0601"
+  };
 }
 
 export default async function handler(req, res) {
-  const debugLogs = [];
   const { searchId } = req.query;
-  debugLogs.push(`[start] handler for searchId=${searchId}`);
+  await authClient.authorize();
+  const sheets = google.sheets('v4');
 
-  try {
-    // 1. 인증
-    await authClient.authorize();
-    debugLogs.push('[step1] Google Sheets auth done');
-
-    const sheets = google.sheets('v4');
-
-    // 2. input 시트 읽기
-    const inResp = await sheets.spreadsheets.values.get({
-      auth: authClient,
-      spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      range: 'input!A:C',
-    });
-    const rows = inResp.data.values || [];
-    debugLogs.push(`[step2] read input sheet, rows=${rows.length}`);
-
-    // 3. 찾기
-    const rowIdx = rows.findIndex(r => String(r[0]) === String(searchId) && r[2] === 'Y');
-    if (rowIdx === -1) {
-      debugLogs.push('[error] no pending row');
-      return res.status(404).json({ error: '실행 대기 중인 searchId가 아닙니다.', debugLogs });
-    }
-    const query = rows[rowIdx][1];
-    debugLogs.push(`[step3] found row, query=${query}`);
-
-    // 4. KIPRIS 호출
-    debugLogs.push('[step4] calling KIPRIS API');
-    let kiprisResp;
-    try {
-      kiprisResp = await axios.get('https://api.kipris.or.kr/kipo-api', {
-        params: {
-          tn: parseSearchQuery(query).trademarkNames.join('+'),
-          tc: parseSearchQuery(query).productClasses.join('+'),
-          sc: parseSearchQuery(query).similarGroupCodes.join(',')
-        },
-        timeout: 8000
-      });
-      debugLogs.push(`[step4] KIPRIS responded, items=${(kiprisResp.data.items||[]).length}`);
-    } catch (e) {
-      debugLogs.push(`[error] KIPRIS call failed: ${e.message}`);
-      return res.status(503).json({ error: 'KIPRIS API 호출 실패', debugLogs });
-    }
-
-    const results = kiprisResp.data.items || [];
-
-    // 5. 결과 시트에 append
-    const now = new Date().toISOString().replace('T',' ').slice(0,19);
-    const appendRows = results.map((item,idx)=>[
-      searchId, idx+1, item.trademarkName, item.applicationNumber,
-      item.applicationDate, item.registrationStatus, item.applicant,
-      item.designatedGoods, item.similarGroupCode, now, ''
-    ]);
-    if (appendRows.length) {
-      await sheets.spreadsheets.values.append({
-        auth: authClient,
-        spreadsheetId: process.env.GOOGLE_SHEET_ID,
-        range: 'result!A:K',
-        valueInputOption: 'USER_ENTERED',
-        requestBody: { values: appendRows }
-      });
-      debugLogs.push(`[step5] appended ${appendRows.length} rows to result sheet`);
-    } else {
-      debugLogs.push('[step5] no results to append');
-    }
-
-    // 6. input 시트 업데이트
-    await sheets.spreadsheets.values.update({
-      auth: authClient,
-      spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      range: `input!C${rowIdx+1}`,
-      valueInputOption: 'USER_ENTERED',
-      requestBody: { values:[['N']] }
-    });
-    debugLogs.push('[step6] runStatus updated to N');
-    await sheets.spreadsheets.values.update({
-      auth: authClient,
-      spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      range: `input!E${rowIdx+1}`,
-      valueInputOption: 'USER_ENTERED',
-      requestBody: { values:[[now]] }
-    });
-    debugLogs.push(`[step6] processedAt set to ${now}`);
-
-    // 7. 응답
-    debugLogs.push('[done] handler complete');
-    return res.status(200).json({ searchId, results, debugLogs });
-
-  } catch (err) {
-    debugLogs.push(`[error] handler exception: ${err.message}`);
-    return res.status(500).json({ error: err.message, debugLogs });
+  // 3) input!A:C 에서 대기 상태(Y)인 searchId 찾기
+  const inResp = await sheets.spreadsheets.values.get({
+    auth: authClient,
+    spreadsheetId: process.env.GOOGLE_SHEET_ID,
+    range: 'input!A:C'
+  });
+  const rows = inResp.data.values || [];
+  const rowIdx = rows.findIndex(r => String(r[0]) === String(searchId) && r[2] === 'Y');
+  if (rowIdx === -1) {
+    return res.status(404).json({ error: '대기 중인 searchId가 아닙니다.' });
   }
+
+  const query = rows[rowIdx][1];
+  const { trademarkNames, classification, similarityCode } = parseSearchQuery(query);
+
+  // 4) getAdvancedSearch 다중 호출 & 합집합 (applicationNumber 기준 중복 제거)
+  const url = 'http://plus.kipris.or.kr/kipo-api/kipi/trademarkInfoSearchService/getAdvancedSearch';
+  const allMap = {};  // { [applicationNumber]: item }
+
+  for (const name of trademarkNames) {
+    const params = {
+      ServiceKey:             process.env.KIPRIS_API_KEY,
+      trademarkName:          name,
+      classification,
+      similarityCode,
+      // 필수 Boolean 플래그들 (모두 포함)
+      application:      true,
+      registration:     true,
+      refused:          true,
+      expiration:       true,
+      withdrawal:       true,
+      publication:      true,
+      cancel:           true,
+      abandonment:      true,
+      trademark:        true,
+      serviceMark:      true,
+      trademarkServiceMark: true,
+      businessEmblem:      true,
+      collectiveMark:      true,
+      geoOrgMark:          true,
+      internationalMark:   true,
+      certMark:            true,
+      geoCertMark:         true,
+      character:           true,
+      figure:              true,
+      compositionCharacter:true,
+      figureComposition:   true,
+      fragrance:           true,
+      sound:               true,
+      color:               true,
+      colorMixed:          true,
+      dimension:           true,
+      hologram:            true,
+      invisible:           true,
+      motion:              true,
+      visual:              true,
+      // 페이징
+      pageNo:    1,
+      numOfRows: 50,
+      _type:     'json'
+    };
+
+    try {
+      const kiprisResp = await axios.get(url, { params, timeout: 8000 });
+      const items = kiprisResp.data?.response?.body?.items?.item || [];
+      for (const it of items) {
+        const key = it.applicationNumber;
+        if (key) allMap[key] = it;
+      }
+    } catch (e) {
+      console.warn(`KIPRIS 호출 실패 (name="${name}")`, e.message);
+      // 다음 name으로 계속
+    }
+  }
+
+  const mergedItems = Object.values(allMap);
+  const now = new Date().toISOString().replace('T',' ').slice(0,19);
+
+  // 5) result 시트에 append
+  if (mergedItems.length > 0) {
+    const appendRows = mergedItems.map((it, idx) => [
+      searchId,
+      it.indexNo,
+      it.applicationNumber,
+      it.applicationDate,
+      it.publicationNumber,
+      it.publicationDate,
+      it.registrationPublicNumber,
+      it.registrationPublicDate,
+      it.registrationNumber,
+      it.registrationDate,
+      it.priorityNumber,
+      it.priorityDate,
+      it.applicationStatus,
+      it.classificationCode,
+      it.viennaCode,
+      it.applicantName,
+      it.agentName,
+      it.regPrivilegeName,
+      it.title,
+      it.fullText,
+      it.drawing,
+      it.bigDrawing,
+      it.appReferenceNumber,
+      it.regReferenceNumber,
+      it.internationalRegisterNumber,
+      it.internationalRegisterDate,
+      now,
+      ''  // 평가용 칼럼
+    ]);
+
+    await sheets.spreadsheets.values.append({
+      auth: authClient,
+      spreadsheetId: process.env.GOOGLE_SHEET_ID,
+      range: 'result!A:Z',
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: appendRows }
+    });
+  }
+
+  // 6) input 시트 runStatus=N, processedAt 업데이트
+  await sheets.spreadsheets.values.update({
+    auth: authClient,
+    spreadsheetId: process.env.GOOGLE_SHEET_ID,
+    range: `input!C${rowIdx+1}`,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values: [['N']] }
+  });
+  await sheets.spreadsheets.values.update({
+    auth: authClient,
+    spreadsheetId: process.env.GOOGLE_SHEET_ID,
+    range: `input!E${rowIdx+1}`,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values:[[now]] }
+  });
+
+  // 7) 응답
+  return res.status(200).json({ searchId, results: mergedItems });
 }
