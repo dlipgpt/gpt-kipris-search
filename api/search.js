@@ -52,6 +52,11 @@ export default async function handler(req, res) {
     };
     const { tnList, tcList, scList } = parseQuery(row.searchQuery);
 
+    // 로그 추가: 쿼리 파라미터가 정상적으로 파싱되었는지 확인
+    console.log('TN List:', tnList);  // TN 리스트가 제대로 출력되는지 확인
+    console.log('TC List:', tcList);  // TC 리스트가 제대로 출력되는지 확인
+    console.log('SC List:', scList);  // SC 리스트가 제대로 출력되는지 확인
+
     // 6) 모든 조합으로 KIPRIS 호출
     const combos = [];
     for (const tn of tnList)
