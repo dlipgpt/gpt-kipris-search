@@ -1,5 +1,3 @@
-// api/search.js
-
 import { GoogleSpreadsheet } from "google-spreadsheet";
 import axios from "axios";
 
@@ -11,8 +9,8 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "searchId가 필요합니다." });
     }
 
-    // 2) 구글시트 로드
-    const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEETS_SPREADSHEET_ID);
+    // 2) 구글 시트 로드
+    const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID); // 환경 변수로 스프레드시트 ID 사용
     await doc.useServiceAccountAuth(
       JSON.parse(process.env.GOOGLE_SHEETS_CREDENTIALS)
     );
@@ -101,7 +99,7 @@ export default async function handler(req, res) {
         numOfRows: 500,
         sortSpec: "applicationDate",
         descSort: true,
-        ServiceKey: process.env.KIPRIS_KEY,
+        ServiceKey: process.env.KIPRIS_API_KEY, // 환경 변수로 KIPRIS API 키 사용
         _type: "json"
       };
       const { data } = await axios.get(
