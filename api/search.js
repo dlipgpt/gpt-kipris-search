@@ -2,16 +2,13 @@
 import { google } from 'googleapis';
 import axios from 'axios';
 
-// Google Sheets 서비스 계정 인증
 const creds = JSON.parse(process.env.GOOGLE_SHEETS_CREDENTIALS);
 const authClient = new google.auth.JWT(
-  creds.client_email,
-  null,
-  creds.private_key,
+  creds.client_email, null, creds.private_key,
   ['https://www.googleapis.com/auth/spreadsheets']
 );
 
-// 검색식 파싱 함수
+// 검색식 파싱
 function parseSearchQuery(q) {
   const tn = (q.match(/TN=\[([^\]]+)\]/) || [])[1]?.split('+') || [];
   const tc = (q.match(/TC=\[([^\]]+)\]/) || [])[1]?.split('+') || [];
@@ -20,36 +17,37 @@ function parseSearchQuery(q) {
 }
 
 export default async function handler(req, res) {
+  const debugLogs = [];
   const { searchId } = req.query;
-  console.log(`[search] start handler for searchId=${searchId}`);
+  debugLogs.push(`[start] handler for searchId=${searchId}`);
 
   try {
-    // 1) Google Sheets 인증
+    // 1. 인증
     await authClient.authorize();
-    console.log('[search] Google Sheets auth done');
+    debugLogs.push('[step1] Google Sheets auth done');
 
     const sheets = google.sheets('v4');
 
-    // 2) input 시트에서 A:C 읽기
+    // 2. input 시트 읽기
     const inResp = await sheets.spreadsheets.values.get({
       auth: authClient,
       spreadsheetId: process.env.GOOGLE_SHEET_ID,
       range: 'input!A:C',
     });
     const rows = inResp.data.values || [];
-    console.log('[search] input sheet read, rows length =', rows.length);
+    debugLogs.push(`[step2] read input sheet, rows=${rows.length}`);
 
-    // 3) 해당 searchId & runStatus=Y인 행 찾기
+    // 3. 찾기
     const rowIdx = rows.findIndex(r => String(r[0]) === String(searchId) && r[2] === 'Y');
     if (rowIdx === -1) {
-      console.log('[search] no pending row found for', searchId);
-      return res.status(404).json({ error: '실행 대기 중인 searchId가 아닙니다.' });
+      debugLogs.push('[error] no pending row');
+      return res.status(404).json({ error: '실행 대기 중인 searchId가 아닙니다.', debugLogs });
     }
     const query = rows[rowIdx][1];
-    console.log('[search] parsed query =', query);
+    debugLogs.push(`[step3] found row, query=${query}`);
 
-    // 4) KIPRIS API 호출
-    console.log('[search] calling KIPRIS API...');
+    // 4. KIPRIS 호출
+    debugLogs.push('[step4] calling KIPRIS API');
     let kiprisResp;
     try {
       kiprisResp = await axios.get('https://api.kipris.or.kr/kipo-api', {
@@ -58,33 +56,24 @@ export default async function handler(req, res) {
           tc: parseSearchQuery(query).productClasses.join('+'),
           sc: parseSearchQuery(query).similarGroupCodes.join(',')
         },
-        timeout: 8000  // 8초 타임아웃
+        timeout: 8000
       });
-      console.log('[search] KIPRIS response received, item count =', (kiprisResp.data.items || []).length);
+      debugLogs.push(`[step4] KIPRIS responded, items=${(kiprisResp.data.items||[]).length}`);
     } catch (e) {
-      console.error('[search] KIPRIS 호출 실패:', e.message);
-      return res.status(503).json({ error: 'KIPRIS API 호출 타임아웃 혹은 오류' });
+      debugLogs.push(`[error] KIPRIS call failed: ${e.message}`);
+      return res.status(503).json({ error: 'KIPRIS API 호출 실패', debugLogs });
     }
 
     const results = kiprisResp.data.items || [];
 
-    // 5) 결과를 result 시트에 append
+    // 5. 결과 시트에 append
     const now = new Date().toISOString().replace('T',' ').slice(0,19);
-    const appendRows = results.map((item, idx) => [
-      searchId,
-      idx + 1,
-      item.trademarkName,
-      item.applicationNumber,
-      item.applicationDate,
-      item.registrationStatus,
-      item.applicant,
-      item.designatedGoods,
-      item.similarGroupCode,
-      now,
-      '' // 평가(evaluation)는 GPTs 쪽에서 채워줍니다
+    const appendRows = results.map((item,idx)=>[
+      searchId, idx+1, item.trademarkName, item.applicationNumber,
+      item.applicationDate, item.registrationStatus, item.applicant,
+      item.designatedGoods, item.similarGroupCode, now, ''
     ]);
-
-    if (appendRows.length > 0) {
+    if (appendRows.length) {
       await sheets.spreadsheets.values.append({
         auth: authClient,
         spreadsheetId: process.env.GOOGLE_SHEET_ID,
@@ -92,36 +81,35 @@ export default async function handler(req, res) {
         valueInputOption: 'USER_ENTERED',
         requestBody: { values: appendRows }
       });
-      console.log('[search] appended results to result sheet, rows =', appendRows.length);
+      debugLogs.push(`[step5] appended ${appendRows.length} rows to result sheet`);
     } else {
-      console.log('[search] no results to append');
+      debugLogs.push('[step5] no results to append');
     }
 
-    // 6) input 시트의 runStatus 및 processedAt 업데이트
+    // 6. input 시트 업데이트
     await sheets.spreadsheets.values.update({
       auth: authClient,
       spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      range: `input!C${rowIdx + 1}`,
+      range: `input!C${rowIdx+1}`,
       valueInputOption: 'USER_ENTERED',
-      requestBody: { values: [['N']] }
+      requestBody: { values:[['N']] }
     });
-    console.log('[search] input runStatus updated to N');
-
+    debugLogs.push('[step6] runStatus updated to N');
     await sheets.spreadsheets.values.update({
       auth: authClient,
       spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      range: `input!E${rowIdx + 1}`,
+      range: `input!E${rowIdx+1}`,
       valueInputOption: 'USER_ENTERED',
-      requestBody: { values: [[now]] }
+      requestBody: { values:[[now]] }
     });
-    console.log('[search] input processedAt updated to', now);
+    debugLogs.push(`[step6] processedAt set to ${now}`);
 
-    // 7) 최종 응답
-    console.log('[search] handler complete for', searchId);
-    return res.status(200).json({ searchId, results });
+    // 7. 응답
+    debugLogs.push('[done] handler complete');
+    return res.status(200).json({ searchId, results, debugLogs });
 
   } catch (err) {
-    console.error('[search] handler error:', err.message);
-    return res.status(500).json({ error: err.message });
+    debugLogs.push(`[error] handler exception: ${err.message}`);
+    return res.status(500).json({ error: err.message, debugLogs });
   }
 }
