@@ -10,7 +10,7 @@
         "summary": "대기 중인 검색 요청 목록 조회",
         "responses": {
           "200": {
-            "description": "runStatus=Y인 searchId와 searchQuery 배열",
+            "description": "runStatus=Y인 searchId 및 searchQuery 배열",
             "content": {
               "application/json": {
                 "schema": {
