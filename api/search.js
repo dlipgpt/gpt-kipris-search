@@ -59,6 +59,8 @@ export default async function handler(req, res) {
         for (const sc of scList)
           combos.push({ tn, tc, sc });
 
+    console.log("조합 리스트:", combos);  // 조합 리스트 확인 (디버깅)
+
     let allItems = [];
     for (const { tn, tc, sc } of combos) {
       const params = {
@@ -102,13 +104,20 @@ export default async function handler(req, res) {
         ServiceKey: process.env.KIPRIS_API_KEY, // 환경 변수로 KIPRIS API 키 사용
         _type: "json"
       };
+
+      // KIPRIS API 호출
       const { data } = await axios.get(
         "http://plus.kipris.or.kr/kipo-api/kipi/trademarkInfoSearchService/getAdvancedSearch",
         { params, timeout: 15000 }
       );
+
+      console.log('KIPRIS API 응답 데이터:', data); // KIPRIS API 응답 내용 확인 (디버깅)
+
       const items = data?.response?.body?.items?.item;
       if (Array.isArray(items)) {
         allItems = allItems.concat(items);
+      } else {
+        console.log('KIPRIS API에서 아이템을 찾을 수 없음');
       }
     }
 
@@ -135,6 +144,9 @@ export default async function handler(req, res) {
       drawing: item.drawing,
       bigDrawing: item.bigDrawing
     }));
+
+    console.log('결과 데이터:', appendRows); // 추가할 데이터 확인 (디버깅)
+
     await resultSheet.addRows(appendRows);
 
     // 9) 최종 응답
