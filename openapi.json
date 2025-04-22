@@ -1,0 +1,54 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "KIPRIS Trademark Search",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/api/search": {
+      "get": {
+        "summary": "input 시트의 searchId로 상표 검색 결과 조회",
+        "parameters": [
+          {
+            "name": "searchId",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "input 시트의 searchId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "검색 결과 반환",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "searchId": { "type": "string" },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "trademarkName": { "type": "string" },
+                          "applicationNumber": { "type": "string" },
+                          "applicationDate": { "type": "string" },
+                          "registrationStatus": { "type": "string" },
+                          "applicant": { "type": "string" },
+                          "designatedGoods": { "type": "string" },
+                          "similarGroupCode": { "type": "string" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
