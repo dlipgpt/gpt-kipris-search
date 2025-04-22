@@ -106,6 +106,11 @@ export default async function handler(req, res) {
 
   const mergedItems = Object.values(allMap);
   const now = new Date().toISOString().replace('T',' ').slice(0,19);
+  // 한국 시간 (UTC+9) 기준으로 YYYY-MM-DD HH:mm:ss 생성
+  const now = new Date(Date.now() + 9 * 3600_000)
+    .toISOString()
+    .replace('T',' ')
+    .slice(0,19);
 
   // 5) result 시트에 append
   if (mergedItems.length > 0) {
