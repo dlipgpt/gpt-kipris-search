@@ -1,8 +1,7 @@
-// 1) 외부 라이브러리 로드
+// api/search.js
 import { google } from 'googleapis';
 import axios from 'axios';
 
-// 2) 서비스 계정 인증 준비
 const creds = JSON.parse(process.env.GOOGLE_SHEETS_CREDENTIALS);
 const authClient = new google.auth.JWT(
   creds.client_email,
@@ -11,43 +10,50 @@ const authClient = new google.auth.JWT(
   ['https://www.googleapis.com/auth/spreadsheets']
 );
 
-// 3) 메인 핸들러
-export default async function handler(req, res) {
-  try {
-    // 3-1) searchId 파라미터 확인
-    const { searchId } = req.query;
-    if (!searchId) {
-      return res.status(400).json({ error: 'searchId가 필요합니다.' });
-    }
+function parseSearchQuery(q) {
+  const tn = (q.match(/TN=\[([^\]]+)\]/) || [])[1]?.split('+') || [];
+  const tc = (q.match(/TC=\[([^\]]+)\]/) || [])[1]?.split('+') || [];
+  const sc = (q.match(/SC=\[([^\]]+)\]/) || [])[1]?.split('+') || [];
+  return { trademarkNames: tn, productClasses: tc, similarGroupCodes: sc };
+}
 
-    // 3-2) Google Sheets에서 input 행 읽기
+export default async function handler(req, res) {
+  const { searchId } = req.query;
+  try {
     await authClient.authorize();
     const sheets = google.sheets('v4');
-    const inputResp = await sheets.spreadsheets.values.get({
+
+    // 1) input 시트에서 해당 searchId 행 읽기
+    const inResp = await sheets.spreadsheets.values.get({
       auth: authClient,
       spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      range: 'input!A:D',
+      range: 'input!A:C',
     });
-    const rows = inputResp.data.values || [];
-    const row = rows.find(r => r[0] === searchId && r[2] === 'Y');
-    if (!row) {
+    const rows = inResp.data.values || [];
+    const rowIdx = rows.findIndex(r => String(r[0]) === String(searchId) && r[2] === 'Y');
+    if (rowIdx === -1) {
       return res.status(404).json({ error: '실행 대기 중인 searchId가 아닙니다.' });
     }
-    const searchQuery = row[1];
+    const query = rows[rowIdx][1];
 
-    // 3-3) 검색식 파싱
-    const parsed = parseSearchQuery(searchQuery);
+    // 2) 검색식 파싱
+    const { trademarkNames, productClasses, similarGroupCodes } = parseSearchQuery(query);
 
-    // 3-4) KIPRIS API 호출
-    const kiprisResp = await axios.get(
-      'https://kipris.or.kr/openapi/trademark/getAdvancedSearch',
-      { params: { apiKey: process.env.KIPRIS_API_KEY, ...parsed } }
-    );
+    // 3) KIPRIS API 호출 (예시)
+    const kiprisResp = await axios.get('https://api.kipris.or.kr/kipo-api', {
+      params: {
+        tn: trademarkNames.join('+'),
+        tc: productClasses.join('+'),
+        sc: similarGroupCodes.join(',')
+      }
+    });
     const results = kiprisResp.data.items || [];
 
-    // 3-5) result 시트에 저장
-    const outputValues = results.map(item => [
+    // 4) result 시트에 append
+    const now = new Date().toISOString().replace('T',' ').slice(0,19);
+    const appendRows = results.map((item, idx) => [
       searchId,
+      idx+1,
       item.trademarkName,
       item.applicationNumber,
       item.applicationDate,
@@ -55,33 +61,39 @@ export default async function handler(req, res) {
       item.applicant,
       item.designatedGoods,
       item.similarGroupCode,
-      ''
+      now,
+      ''  // evaluation은 GPTs 쪽에서 채웁니다
     ]);
-    await sheets.spreadsheets.values.append({
+    if (appendRows.length > 0) {
+      await sheets.spreadsheets.values.append({
+        auth: authClient,
+        spreadsheetId: process.env.GOOGLE_SHEET_ID,
+        range: 'result!A:K',
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values: appendRows }
+      });
+    }
+
+    // 5) input 시트 runStatus, processedAt 업데이트
+    await sheets.spreadsheets.values.update({
       auth: authClient,
       spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      range: 'result!A:I',
+      range: `input!C${rowIdx+1}`,
       valueInputOption: 'USER_ENTERED',
-      requestBody: { values: outputValues }
+      requestBody: { values: [['N']] }
+    });
+    await sheets.spreadsheets.values.update({
+      auth: authClient,
+      spreadsheetId: process.env.GOOGLE_SHEET_ID,
+      range: `input!E${rowIdx+1}`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [[now]] }
     });
 
-    // 3-6) GPTs에 응답
-    res.status(200).json({ success: true, searchId, results });
-
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: error.message });
+    // 6) 응답
+    return res.status(200).json({ searchId, results });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: err.message });
   }
-}
-
-// 4) 검색식 파싱 함수
-function parseSearchQuery(q) {
-  const out = {};
-  const tnMatch = q.match(/TN=\[([^\]]+)\]/);
-  if (tnMatch) out.trademarkNames = tnMatch[1].split('+');
-  const tcMatch = q.match(/TC=\[([^\]]+)\]/);
-  if (tcMatch) out.productClasses = tcMatch[1].split('+');
-  const scMatch = q.match(/SC=\[([^\]]+)\]/);
-  if (scMatch) out.similarGroupCodes = scMatch[1].split('+');
-  return out;
 }
