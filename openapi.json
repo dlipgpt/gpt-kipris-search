@@ -4,6 +4,11 @@
     "title": "KIPRIS Trademark Search",
     "version": "1.0.0"
   },
+  "servers": [
+    {
+      "url": "https://gpt-kipris-search.vercel.app"
+    }
+  ],
   "paths": {
     "/api/pending": {
       "get": {
