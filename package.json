@@ -8,6 +8,6 @@
   "dependencies": {
     "axios": "^1.4.0",
     "googleapis": "^109.0.0",
-    "google-spreadsheet": "^5.4.0"
+    "google-spreadsheet": "^3.0.8"
   }
 }
