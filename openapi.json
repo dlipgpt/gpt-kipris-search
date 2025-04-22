@@ -5,9 +5,33 @@
     "version": "1.0.0"
   },
   "paths": {
+    "/api/pending": {
+      "get": {
+        "summary": "대기 중인 검색 요청 목록 조회",
+        "responses": {
+          "200": {
+            "description": "runStatus=Y인 searchId와 searchQuery 배열",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "searchId": { "type": "string" },
+                      "searchQuery": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/search": {
       "get": {
-        "summary": "input 시트의 searchId로 상표 검색 결과 조회",
+        "summary": "지정된 searchId로 상표 검색 실행",
         "parameters": [
           {
             "name": "searchId",
@@ -19,13 +43,12 @@
         ],
         "responses": {
           "200": {
-            "description": "검색 결과 반환",
+            "description": "검색 결과 및 처리 상태 반환",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "success": { "type": "boolean" },
                     "searchId": { "type": "string" },
                     "results": {
                       "type": "array",
