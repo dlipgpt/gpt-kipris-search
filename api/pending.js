@@ -1,4 +1,3 @@
-// api/pending.js
 import { google } from 'googleapis';
 
 // 서비스 계정 인증 준비
@@ -16,11 +15,11 @@ export default async function handler(req, res) {
     await authClient.authorize();
     const sheets = google.sheets('v4');
 
-    // 2) input 시트 A:C (searchId, query, runStatus) 읽기
+    // 2) 구글 스프레드시트에서 'input' 시트 A:C (searchId, query, runStatus) 읽기
     const inputResp = await sheets.spreadsheets.values.get({
       auth: authClient,
-      spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      range: 'input!A:C',
+      spreadsheetId: process.env.GOOGLE_SHEET_ID, // 환경 변수로 스프레드시트 ID 사용
+      range: 'input!A:C', // 범위 설정
     });
     const rows = inputResp.data.values || [];
 
