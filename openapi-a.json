@@ -1,0 +1,72 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "A-GPTs Trademark Search Input",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://gpt-kipris-search.vercel.app"
+    }
+  ],
+  "paths": {
+    "/api/addInputRow": {
+      "post": {
+        "operationId": "addInputRow",
+        "summary": "A-GPTs 검색식 저장",
+        "description": "GPT에서 생성된 baseTrademark 및 searchQuery 값을 input 시트에 저장합니다.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "baseTrademark": {
+                    "type": "string",
+                    "description": "검색 기준이 되는 base 상표명 (예: TN=[최애]*TC=[41+09]*SC=[S110101+G390802])"
+                  },
+                  "searchQuery": {
+                    "type": "string",
+                    "description": "GPT가 생성한 확장 검색식 (예: TN=[최애+저금]*TC=[41+09]*SC=[S110101+G390802])"
+                  }
+                },
+                "required": ["baseTrademark", "searchQuery"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "저장 성공 여부 및 생성된 searchId 반환",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": { "type": "string" },
+                    "searchId": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "서버 오류",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string" },
+                    "details": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
