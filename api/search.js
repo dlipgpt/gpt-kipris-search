@@ -165,3 +165,4 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "서버 오류 발생", detail: err.message });
   }
 }
+
