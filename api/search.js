@@ -117,19 +117,19 @@ export default async function handler(req, res) {
       }
     }
 
-    const seen = new Set();
-    const uniqueItems = allItems.filter(item => {
-      if (seen.has(item.applicationNumber)) return false;
-      seen.add(item.applicationNumber);
-      return true;
-    });
+    // 🔄 중복 제거 (덮어쓰기 방식)
+    const uniqueMap = new Map();
+    for (const item of allItems) {
+      uniqueMap.set(item.applicationNumber, item); // 중복되면 나중 데이터로 덮어쓰기
+    }
+    const uniqueItems = Array.from(uniqueMap.values());
 
     const resultSheet = doc.sheetsByTitle["result"];
     await resultSheet.loadHeaderRow();
 
     const appendRows = uniqueItems.map((item, i) => ({
       searchId,
-      indexNo: i + 1,  // 순차적 indexNo 부여
+      indexNo: i + 1,
       applicationNumber: item.applicationNumber || "",
       applicationDate: item.applicationDate || "",
       publicationNumber: item.publicationNumber || "",
