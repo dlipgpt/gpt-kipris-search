@@ -16,11 +16,14 @@ export default async function handler(req, res) {
 
     const inputSheet = doc.sheetsByTitle["input"];
     await inputSheet.loadHeaderRow();
-    const rows = await inputSheet.getRows();
-    const row = rows.find(r => String(r.searchId) === String(searchId) && r.runStatus === "Y");
+    const inputRows = await inputSheet.getRows();
+    const row = inputRows.find(r => String(r.searchId) === String(searchId) && r.runStatus === "Y");
     if (!row) {
       return res.status(400).json({ error: "대기 중인 searchId가 아닙니다." });
     }
+
+    const baseTrademark = row.baseTrademark || "";
+    const query = row.searchQuery;
 
     const now = new Date();
     const seoulTime = now.toLocaleString("ko-KR", {
@@ -45,7 +48,7 @@ export default async function handler(req, res) {
         scList: extract("SC"),
       };
     };
-    const { tnList, tcList, scList } = parseQuery(row.searchQuery);
+    const { tnList, tcList, scList } = parseQuery(query);
     console.log('TN List:', tnList);
     console.log('TC List:', tcList);
     console.log('SC List:', scList);
@@ -115,68 +118,49 @@ export default async function handler(req, res) {
       }
     }
 
-    // 🔍 디버깅 1: 전체 출원번호 로깅
-    const allAppNos = allItems.map(i => i.applicationNumber);
-    console.log('📦 allItems 총 개수:', allItems.length);
-    console.log('📋 모든 출원번호:', allAppNos);
-
-    // 🔄 중복 제거 (덮어쓰기 방식) + 디버깅 포함
+    // 중복 제거 (덮어쓰기 방식)
     const uniqueMap = new Map();
     for (const item of allItems) {
-      if (!item.applicationNumber) {
-        console.log("❗ 출원번호 누락된 항목:", item);
-        continue;
-      }
-      if (item.applicationNumber === "4020200096727") {
-        console.log("👀 디버깅 대상 발견 (Map에 저장됨):", item.title);
-      }
-      uniqueMap.set(item.applicationNumber, item); // 중복 시 덮어쓰기
+      if (!item.applicationNumber) continue;
+      uniqueMap.set(item.applicationNumber, item);
     }
     const uniqueItems = Array.from(uniqueMap.values());
 
     const resultSheet = doc.sheetsByTitle["result"];
     await resultSheet.loadHeaderRow();
 
-    const appendRows = uniqueItems.map((item, i) => {
-      const row = {
-        searchId,
-        indexNo: i + 1,
-        applicationNumber: item.applicationNumber || "",
-        applicationDate: item.applicationDate || "",
-        publicationNumber: item.publicationNumber || "",
-        publicationDate: item.publicationDate || "",
-        registrationPublicNumber: item.registrationPublicNumber || "",
-        registrationPublicDate: item.registrationPublicDate || "",
-        registrationNumber: item.registrationNumber || "",
-        registrationDate: item.registrationDate || "",
-        priorityNumber: item.priorityNumber || "",
-        priorityDate: item.priorityDate || "",
-        applicationStatus: item.applicationStatus || "",
-        classificationCode: item.classificationCode || "",
-        viennaCode: item.viennaCode || "",
-        applicantName: item.applicantName || "",
-        agentName: item.agentName || "",
-        title: item.title || "",
-        fullText: item.fullText || "",
-        drawing: item.drawing || "",
-        bigDrawing: item.bigDrawing || "",
-        appReferenceNumber: item.appReferenceNumber || "",
-        regReferenceNumber: item.regReferenceNumber || "",
-        internationalRegisterNumber: item.internationalRegisterNumber || "",
-        internationalRegisterDate: item.internationalRegisterDate || "",
-        processedAt: seoulTime,
-        evaluation: ""
-      };
+    const appendRows = uniqueItems.map((item, i) => ({
+      searchId,
+      indexNo: i + 1,
+      baseTrademark, // ✅ baseTrademark 추가
+      applicationNumber: item.applicationNumber || "",
+      applicationDate: item.applicationDate || "",
+      publicationNumber: item.publicationNumber || "",
+      publicationDate: item.publicationDate || "",
+      registrationPublicNumber: item.registrationPublicNumber || "",
+      registrationPublicDate: item.registrationPublicDate || "",
+      registrationNumber: item.registrationNumber || "",
+      registrationDate: item.registrationDate || "",
+      priorityNumber: item.priorityNumber || "",
+      priorityDate: item.priorityDate || "",
+      applicationStatus: item.applicationStatus || "",
+      classificationCode: item.classificationCode || "",
+      viennaCode: item.viennaCode || "",
+      applicantName: item.applicantName || "",
+      agentName: item.agentName || "",
+      title: item.title || "",
+      fullText: item.fullText || "",
+      drawing: item.drawing || "",
+      bigDrawing: item.bigDrawing || "",
+      appReferenceNumber: item.appReferenceNumber || "",
+      regReferenceNumber: item.regReferenceNumber || "",
+      internationalRegisterNumber: item.internationalRegisterNumber || "",
+      internationalRegisterDate: item.internationalRegisterDate || "",
+      processedAt: seoulTime,
+      evaluation: ""
+    }));
 
-      if (row.applicationNumber === "4020200096727") {
-        console.log("✅ 시트에 저장 예정:", row);
-      }
-
-      return row;
-    });
-
-    console.log("📤 최종 저장 대상 개수:", appendRows.length);
-
+    console.log('최종 저장 행 수:', appendRows.length);
     await resultSheet.addRows(appendRows);
 
     return res.json({
