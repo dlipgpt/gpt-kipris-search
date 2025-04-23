@@ -79,6 +79,93 @@
           }
         }
       }
+    },
+    "/api/result": {
+      "get": {
+        "operationId": "getSearchResults",
+        "summary": "지정된 searchId로 저장된 검색 결과 조회",
+        "parameters": [
+          {
+            "name": "searchId",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "검색 결과 배열 반환",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "searchId": { "type": "string" },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "applicationNumber": { "type": "string" },
+                          "title": { "type": "string" },
+                          "classificationCode": { "type": "string" },
+                          "applicantName": { "type": "string" },
+                          "applicationStatus": { "type": "string" },
+                          "registrationNumber": { "type": "string" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/evaluate": {
+      "post": {
+        "operationId": "saveEvaluation",
+        "summary": "GPT 평가 결과를 result 시트에 저장",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "searchId": { "type": "string" },
+                  "evaluations": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "applicationNumber": { "type": "string" },
+                        "evaluation": { "type": "string" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "저장된 행 수",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "updated": { "type": "number" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }
