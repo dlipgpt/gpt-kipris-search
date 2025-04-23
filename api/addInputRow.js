@@ -1,5 +1,4 @@
 import { GoogleSpreadsheet } from 'google-spreadsheet';
-import { JWT } from 'google-auth-library';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -15,14 +14,13 @@ export default async function handler(req, res) {
   try {
     const credentials = JSON.parse(process.env.GOOGLE_SHEETS_CREDENTIALS);
 
-    const auth = new JWT({
-      email: credentials.client_email,
-      key: credentials.private_key.replace(/\\n/g, '\n'),
-      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID);
+
+    await doc.useServiceAccountAuth({
+      client_email: credentials.client_email,
+      private_key: credentials.private_key.replace(/\\n/g, '\n'),
     });
 
-    const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID);
-    await doc.useAuthClient(auth);
     await doc.loadInfo();
 
     const sheet = doc.sheetsByTitle['input'];
@@ -41,10 +39,10 @@ export default async function handler(req, res) {
 
     res.status(200).json({ message: 'Row added successfully', searchId: newSearchId });
   } catch (error) {
-    console.error('[ERROR] Failed to add row to Google Sheets:', error); // 🔍 디버깅 로그
+    console.error('[ERROR] Failed to add row to Google Sheets:', error);
     res.status(500).json({
       error: 'Failed to add row to Google Sheets',
-      details: error.message, // 🔍 오류 메시지를 응답에 포함
+      details: error.message,
     });
   }
 }
