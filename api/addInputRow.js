@@ -41,7 +41,10 @@ export default async function handler(req, res) {
 
     res.status(200).json({ message: 'Row added successfully', searchId: newSearchId });
   } catch (error) {
-    console.error('Error adding row:', error);
-    res.status(500).json({ error: 'Failed to add row to Google Sheets' });
+    console.error('[ERROR] Failed to add row to Google Sheets:', error); // 🔍 디버깅 로그
+    res.status(500).json({
+      error: 'Failed to add row to Google Sheets',
+      details: error.message, // 🔍 오류 메시지를 응답에 포함
+    });
   }
 }
