@@ -95,13 +95,14 @@
         ],
         "responses": {
           "200": {
-            "description": "검색 결과 배열 반환",
+            "description": "검색 결과 및 baseTrademark 반환",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
                     "searchId": { "type": "string" },
+                    "baseTrademark": { "type": "string" },
                     "results": {
                       "type": "array",
                       "items": {
