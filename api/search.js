@@ -126,9 +126,10 @@ export default async function handler(req, res) {
 
     const resultSheet = doc.sheetsByTitle["result"];
     await resultSheet.loadHeaderRow();
-    const appendRows = uniqueItems.map(item => ({
+
+    const appendRows = uniqueItems.map((item, i) => ({
       searchId,
-      indexNo: item.indexNo || "",
+      indexNo: i + 1,  // 순차적 indexNo 부여
       applicationNumber: item.applicationNumber || "",
       applicationDate: item.applicationDate || "",
       publicationNumber: item.publicationNumber || "",
@@ -153,7 +154,7 @@ export default async function handler(req, res) {
       internationalRegisterNumber: item.internationalRegisterNumber || "",
       internationalRegisterDate: item.internationalRegisterDate || "",
       processedAt: seoulTime,
-      evaluation: "" // GPTs에서 이후 평가 후 입력
+      evaluation: ""
     }));
 
     console.log('결과 데이터:', appendRows);
