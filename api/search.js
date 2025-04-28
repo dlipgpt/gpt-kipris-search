@@ -2,7 +2,7 @@ import { GoogleSpreadsheet } from "google-spreadsheet";
 import axios from "axios";
 
 export default async function handler(req, res) {
-  // 1) GET 방식만 허용
+  // GET 방식만 허용
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Only GET requests allowed" });
   }
@@ -13,7 +13,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "searchId가 필요합니다." });
     }
 
-    // 2) Google Sheets 인증 및 input 시트 로드
+    // Google Sheets 인증 및 input 시트 로드
     const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID);
     await doc.useServiceAccountAuth(
       JSON.parse(process.env.GOOGLE_SHEETS_CREDENTIALS)
@@ -35,7 +35,41 @@ export default async function handler(req, res) {
     const baseTrademark = row.baseTrademark || "";
     const query = row.searchQuery; // ex) "TN=[최애+저금]*TC=[41+09]*SC=[S110101+G390802]"
 
-    // 3) 현재 시간(서울) 계산
+    // ─── 디버그 로그 시작 ───
+    console.log("[DEBUG] raw searchQuery:", query);
+    // 파싱 전에는 빈 배열일 수 있으니 선언부 바로 아래에 로그 위치
+    const parseQuery = (q) => {
+      const parts = q.split("*");
+      const map = {};
+      parts.forEach((part) => {
+        const [key, raw] = part.split("=");
+        if (!key || !raw) return;
+        map[key] = raw.replace(/[\[\]]/g, "").split("+");
+      });
+      return {
+        tnList: map["TN"] || [],
+        tcList: map["TC"] || [],
+        scList: map["SC"] || [],
+      };
+    };
+    const { tnList, tcList, scList } = parseQuery(query);
+    console.log("[DEBUG] tnList:", tnList);
+    console.log("[DEBUG] tcList:", tcList);
+    console.log("[DEBUG] scList:", scList);
+
+    // 조합 생성
+    const combos = [];
+    for (const tn of tnList) {
+      for (const tc of tcList) {
+        for (const sc of scList) {
+          combos.push({ tn, tc, sc });
+        }
+      }
+    }
+    console.log("[DEBUG] combos:", combos);
+    // ─── 디버그 로그 끝 ───
+
+    // 현재 시간(서울) 계산
     const now = new Date();
     const seoulTime = now
       .toLocaleString("ko-KR", {
@@ -46,35 +80,12 @@ export default async function handler(req, res) {
       .replace(/년 |월 |일 /g, "")
       .trim();
 
-    // 4) query 파싱: split("*") → split("=") → strip [ ] → split("+")
-    const parseQuery = (q) => {
-      const parts = q.split("*");
-      const map = {};
-      parts.forEach((part) => {
-        const [key, raw] = part.split("=");
-        if (!key || !raw) return;
-        // "[a+b]" → "a+b" → ["a","b"]
-        map[key] = raw.replace(/[\[\]]/g, "").split("+");
-      });
-      return {
-        tnList: map["TN"] || [],
-        tcList: map["TC"] || [],
-        scList: map["SC"] || [],
-      };
-    };
-    const { tnList, tcList, scList } = parseQuery(query);
+    // input 시트 상태 업데이트
+    row.processedAt = seoulTime;
+    row.runStatus = "N";
+    await row.save();
 
-    // 5) 조합 생성
-    const combos = [];
-    for (const tn of tnList) {
-      for (const tc of tcList) {
-        for (const sc of scList) {
-          combos.push({ tn, tc, sc });
-        }
-      }
-    }
-
-    // 6) KIPRIS API 호출 및 결과 수집
+    // KIPRIS API 호출 및 결과 수집
     let allItems = [];
     for (const { tn, tc, sc } of combos) {
       const params = {
@@ -135,7 +146,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // 7) 중복 제거 (applicationNumber 기준)
+    // 중복 제거 (applicationNumber 기준)
     const uniqueMap = new Map();
     for (const item of allItems) {
       if (item.applicationNumber) {
@@ -144,12 +155,7 @@ export default async function handler(req, res) {
     }
     const uniqueItems = Array.from(uniqueMap.values());
 
-    // 8) input 시트 상태 업데이트
-    row.processedAt = seoulTime;
-    row.runStatus = "N";
-    await row.save();
-
-    // 9) result 시트에 일괄 추가
+    // result 시트에 일괄 추가
     const resultSheet = doc.sheetsByTitle["result"];
     await resultSheet.loadHeaderRow();
     const appendRows = uniqueItems.map((item, i) => ({
@@ -184,7 +190,7 @@ export default async function handler(req, res) {
     }));
     await resultSheet.addRows(appendRows);
 
-    // 10) 최종 응답
+    // 최종 응답
     return res.status(200).json({ searchId, results: uniqueItems });
   } catch (err) {
     console.error("[ERROR] api/search.js:", err);
