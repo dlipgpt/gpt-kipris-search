@@ -1,0 +1,154 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "C-GPTs Trademark Evaluation",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://gpt-kipris-search.vercel.app"
+    }
+  ],
+  "paths": {
+    "/api/getSheetData": {
+      "get": {
+        "operationId": "getSheetData",
+        "summary": "result 시트의 전체 또는 특정 searchId 결과 조회",
+        "parameters": [
+          {
+            "name": "searchId",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" },
+            "description": "조회할 searchId (미제공 시 전체 결과 반환)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "전체 또는 특정 searchId 결과 반환",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/ResultRow" }
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "searchId": { "type": "string" },
+                        "baseTrademark": { "type": "string" },
+                        "results": {
+                          "type": "array",
+                          "items": { "$ref": "#/components/schemas/ResultRow" }
+                        }
+                      },
+                      "required": ["searchId", "baseTrademark", "results"]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "해당 searchId 결과 없음",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/evaluate": {
+      "post": {
+        "operationId": "saveEvaluation",
+        "summary": "GPT 평가 결과를 result 시트에 저장",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "searchId": { "type": "string" },
+                  "evaluations": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "applicationNumber": { "type": "string" },
+                        "evaluation": { "type": "string" }
+                      },
+                      "required": ["applicationNumber", "evaluation"]
+                    }
+                  }
+                },
+                "required": ["searchId", "evaluations"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "저장된 행 수",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "updated": { "type": "number" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ResultRow": {
+        "type": "object",
+        "properties": {
+          "searchId": { "type": "string" },
+          "indexNo": { "type": "string" },
+          "baseTrademark": { "type": "string" },
+          "applicationNumber": { "type": "string" },
+          "applicationDate": { "type": "string" },
+          "publicationNumber": { "type": "string" },
+          "publicationDate": { "type": "string" },
+          "registrationPublicNumber": { "type": "string" },
+          "registrationPublicDate": { "type": "string" },
+          "registrationNumber": { "type": "string" },
+          "registrationDate": { "type": "string" },
+          "priorityNumber": { "type": "string" },
+          "priorityDate": { "type": "string" },
+          "applicationStatus": { "type": "string" },
+          "classificationCode": { "type": "string" },
+          "viennaCode": { "type": "string" },
+          "applicantName": { "type": "string" },
+          "agentName": { "type": "string" },
+          "title": { "type": "string" },
+          "fullText": { "type": "string" },
+          "drawing": { "type": "string" },
+          "bigDrawing": { "type": "string" },
+          "appReferenceNumber": { "type": "string" },
+          "regReferenceNumber": { "type": "string" },
+          "internationalRegisterNumber": { "type": "string" },
+          "internationalRegisterDate": { "type": "string" },
+          "processedAt": { "type": "string" },
+          "evaluation": { "type": "string" }
+        }
+      }
+    }
+  }
+}
