@@ -2,12 +2,18 @@ import { GoogleSpreadsheet } from "google-spreadsheet";
 import axios from "axios";
 
 export default async function handler(req, res) {
+  // 1) GET 방식만 허용
+  if (req.method !== "GET") {
+    return res.status(405).json({ error: "Only GET requests allowed" });
+  }
+
   try {
     const searchId = req.query.searchId;
     if (!searchId) {
       return res.status(400).json({ error: "searchId가 필요합니다." });
     }
 
+    // 2) Google Sheets 인증 및 input 시트 로드
     const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID);
     await doc.useServiceAccountAuth(
       JSON.parse(process.env.GOOGLE_SHEETS_CREDENTIALS)
@@ -17,50 +23,58 @@ export default async function handler(req, res) {
     const inputSheet = doc.sheetsByTitle["input"];
     await inputSheet.loadHeaderRow();
     const inputRows = await inputSheet.getRows();
-    const row = inputRows.find(r => String(r.searchId) === String(searchId) && r.runStatus === "Y");
+    const row = inputRows.find(
+      (r) => String(r.searchId) === String(searchId) && r.runStatus === "Y"
+    );
     if (!row) {
-      return res.status(400).json({ error: "대기 중인 searchId가 아닙니다." });
+      return res
+        .status(400)
+        .json({ error: "대기 중인 searchId가 아닙니다." });
     }
 
     const baseTrademark = row.baseTrademark || "";
-    const query = row.searchQuery;
+    const query = row.searchQuery; // ex) "TN=[최애+저금]*TC=[41+09]*SC=[S110101+G390802]"
 
+    // 3) 현재 시간(서울) 계산
     const now = new Date();
-    const seoulTime = now.toLocaleString("ko-KR", {
-      timeZone: "Asia/Seoul",
-      hour12: false
-    })
+    const seoulTime = now
+      .toLocaleString("ko-KR", {
+        timeZone: "Asia/Seoul",
+        hour12: false,
+      })
       .replace(/\./g, "-")
       .replace(/년 |월 |일 /g, "")
       .trim();
-    row.processedAt = seoulTime;
-    row.runStatus = "N";
-    await row.save();
 
+    // 4) query 파싱: split("*") → split("=") → strip [ ] → split("+")
     const parseQuery = (q) => {
-      const extract = key => {
-        const m = q.match(new RegExp(`${key}=\\[([^\\]]+)\\]`));
-        return m ? m[1].split("+") : [];
-      };
+      const parts = q.split("*");
+      const map = {};
+      parts.forEach((part) => {
+        const [key, raw] = part.split("=");
+        if (!key || !raw) return;
+        // "[a+b]" → "a+b" → ["a","b"]
+        map[key] = raw.replace(/[\[\]]/g, "").split("+");
+      });
       return {
-        tnList: extract("TN"),
-        tcList: extract("TC"),
-        scList: extract("SC"),
+        tnList: map["TN"] || [],
+        tcList: map["TC"] || [],
+        scList: map["SC"] || [],
       };
     };
     const { tnList, tcList, scList } = parseQuery(query);
-    console.log('TN List:', tnList);
-    console.log('TC List:', tcList);
-    console.log('SC List:', scList);
 
+    // 5) 조합 생성
     const combos = [];
-    for (const tn of tnList)
-      for (const tc of tcList)
-        for (const sc of scList)
+    for (const tn of tnList) {
+      for (const tc of tcList) {
+        for (const sc of scList) {
           combos.push({ tn, tc, sc });
+        }
+      }
+    }
 
-    console.log("조합 리스트:", combos);
-
+    // 6) KIPRIS API 호출 및 결과 수집
     let allItems = [];
     for (const { tn, tc, sc } of combos) {
       const params = {
@@ -102,37 +116,46 @@ export default async function handler(req, res) {
         sortSpec: "applicationDate",
         descSort: true,
         ServiceKey: process.env.KIPRIS_API_KEY,
-        _type: "json"
+        _type: "json",
       };
 
-      const { data } = await axios.get(
-        "http://plus.kipris.or.kr/kipo-api/kipi/trademarkInfoSearchService/getAdvancedSearch",
-        { params, timeout: 15000 }
-      );
-
-      const items = data?.response?.body?.items?.item;
-      if (Array.isArray(items)) {
-        allItems = allItems.concat(items);
-      } else {
-        console.log('KIPRIS API에서 아이템을 찾을 수 없음');
+      try {
+        const { data } = await axios.get(
+          "http://plus.kipris.or.kr/kipo-api/kipi/trademarkInfoSearchService/getAdvancedSearch",
+          { params, timeout: 15000 }
+        );
+        const items = data?.response?.body?.items?.item;
+        if (Array.isArray(items)) {
+          allItems = allItems.concat(items);
+        }
+      } catch (err) {
+        console.warn(
+          `[WARN] KIPRIS 호출 실패 (TN=${tn},TC=${tc},SC=${sc}): ${err.message}`
+        );
       }
     }
 
-    // 중복 제거 (덮어쓰기 방식)
+    // 7) 중복 제거 (applicationNumber 기준)
     const uniqueMap = new Map();
     for (const item of allItems) {
-      if (!item.applicationNumber) continue;
-      uniqueMap.set(item.applicationNumber, item);
+      if (item.applicationNumber) {
+        uniqueMap.set(item.applicationNumber, item);
+      }
     }
     const uniqueItems = Array.from(uniqueMap.values());
 
+    // 8) input 시트 상태 업데이트
+    row.processedAt = seoulTime;
+    row.runStatus = "N";
+    await row.save();
+
+    // 9) result 시트에 일괄 추가
     const resultSheet = doc.sheetsByTitle["result"];
     await resultSheet.loadHeaderRow();
-
     const appendRows = uniqueItems.map((item, i) => ({
       searchId,
       indexNo: i + 1,
-      baseTrademark, // ✅ baseTrademark 추가
+      baseTrademark,
       applicationNumber: item.applicationNumber || "",
       applicationDate: item.applicationDate || "",
       publicationNumber: item.publicationNumber || "",
@@ -157,19 +180,16 @@ export default async function handler(req, res) {
       internationalRegisterNumber: item.internationalRegisterNumber || "",
       internationalRegisterDate: item.internationalRegisterDate || "",
       processedAt: seoulTime,
-      evaluation: ""
+      evaluation: "",
     }));
-
-    console.log('최종 저장 행 수:', appendRows.length);
     await resultSheet.addRows(appendRows);
 
-    return res.json({
-      searchId,
-      results: uniqueItems
-    });
-
+    // 10) 최종 응답
+    return res.status(200).json({ searchId, results: uniqueItems });
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: "서버 오류 발생", detail: err.message });
+    console.error("[ERROR] api/search.js:", err);
+    return res
+      .status(500)
+      .json({ error: "서버 오류 발생", detail: err.message });
   }
 }
