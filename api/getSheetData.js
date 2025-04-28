@@ -1,35 +1,64 @@
 import { GoogleSpreadsheet } from 'google-spreadsheet';
 
-async function handler(req, res) {
-  // POST 메서드만 처리
+export default async function handler(req, res) {
+  // Only GET allowed
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Only GET requests allowed' });
   }
 
+  const { searchId } = req.query;
+
   try {
+    // Parse service account credentials
+    const creds = JSON.parse(process.env.GOOGLE_SHEETS_CREDENTIALS);
     const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID);
 
-    // 서비스 계정 인증
+    // Authenticate with Google Sheets
     await doc.useServiceAccountAuth({
-      client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-      private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      client_email: creds.client_email,
+      private_key: creds.private_key.replace(/\\n/g, '\n'),
     });
-
-    // 구글 시트 문서 불러오기
     await doc.loadInfo();
 
-    // 'result' 시트 선택
+    // Access the result sheet
     const sheet = doc.sheetsByTitle['result'];
-
-    // 시트에서 모든 데이터 가져오기
+    await sheet.loadHeaderRow();
     const rows = await sheet.getRows();
 
-    // 성공적으로 데이터를 불러오면 JSON 형식으로 반환
-    res.status(200).json(rows);
+    // If searchId provided, filter and return structured result
+    if (searchId) {
+      const matched = rows.filter(r => String(r.searchId) === String(searchId));
+      if (matched.length === 0) {
+        return res.status(404).json({ error: `No results found for searchId ${searchId}` });
+      }
+
+      // Extract baseTrademark from first matching row
+      const baseTrademark = matched[0].baseTrademark || '';
+
+      // Map rows to objects using headerValues
+      const results = matched.map(r => {
+        const obj = {};
+        sheet.headerValues.forEach(h => {
+          obj[h] = r[h] || '';
+        });
+        return obj;
+      });
+
+      return res.status(200).json({ searchId: String(searchId), baseTrademark, results });
+    }
+
+    // No searchId: return all rows as array of objects
+    const allData = rows.map(r => {
+      const obj = {};
+      sheet.headerValues.forEach(h => {
+        obj[h] = r[h] || '';
+      });
+      return obj;
+    });
+
+    return res.status(200).json(allData);
   } catch (error) {
-    console.error('[ERROR] Failed to fetch data:', error);
-    res.status(500).json({ error: 'Failed to fetch data' });
+    console.error('[ERROR] getSheetData failed:', error);
+    return res.status(500).json({ error: 'Failed to fetch data', detail: error.message });
   }
 }
-
-export default handler;
